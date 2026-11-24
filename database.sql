@@ -24,6 +24,7 @@ CREATE TABLE usuarios (
 
 CREATE TABLE edificios (
     id VARCHAR(50) PRIMARY KEY,
+    codigo VARCHAR(50),
     nombre VARCHAR(150) NOT NULL,
     altura NUMERIC(5,2) DEFAULT 4,
     base NUMERIC(5,2) DEFAULT 0,
@@ -46,6 +47,8 @@ CREATE TABLE lugares (
 CREATE TABLE tramos_ruta (
     id SERIAL PRIMARY KEY,
     tipo VARCHAR(40) DEFAULT 'andador',
+    piso VARCHAR(20) DEFAULT 'pb',
+    edificio_id VARCHAR(50),
     habilitado BOOLEAN DEFAULT TRUE,
     geometria JSONB NOT NULL
 );
