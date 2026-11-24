@@ -19,8 +19,9 @@ const origenesPermitidos = [
   'http://127.0.0.1:3000',
   'https://localhost',
   'http://localhost',
-  'capacitor://localhost'
-];
+  'capacitor://localhost',
+  process.env.RENDER_EXTERNAL_URL
+].filter(Boolean);
 
 app.use(
   cors({
