@@ -339,3 +339,216 @@ export const resolverReporte = async (req, res) => {
     client.release();
   }
 };
+
+let tablaSugerenciasLista = null;
+
+export const asegurarTablaSugerencias = () => {
+  if (!tablaSugerenciasLista) {
+    tablaSugerenciasLista = pool
+      .query(`
+        CREATE TABLE IF NOT EXISTS sugerencias_lugar (
+          id SERIAL PRIMARY KEY,
+          nombre VARCHAR(150) NOT NULL,
+          descripcion TEXT,
+          tipo VARCHAR(60) NOT NULL DEFAULT 'Punto de Interés',
+          longitud DOUBLE PRECISION NOT NULL,
+          latitud DOUBLE PRECISION NOT NULL,
+          usuario_id INTEGER REFERENCES usuarios(id) ON DELETE CASCADE,
+          estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+          creado_en TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+      `)
+      .catch((err) => {
+        tablaSugerenciasLista = null;
+        throw err;
+      });
+  }
+  return tablaSugerenciasLista;
+};
+
+export const crearSugerenciaLugar = async (req, res) => {
+  const { nombre, descripcion = '', coordenadas } = req.body;
+
+  if (!nombre || !String(nombre).trim() || !Array.isArray(coordenadas) || coordenadas.length < 2) {
+    return res.status(400).json({
+      error: 'Debes indicar el nombre y seleccionar el punto en el mapa.'
+    });
+  }
+
+  const lng = Number(coordenadas[0]);
+  const lat = Number(coordenadas[1]);
+  if (Number.isNaN(lng) || Number.isNaN(lat)) {
+    return res.status(400).json({ error: 'Coordenadas inválidas.' });
+  }
+
+  const nombreLimpio = String(nombre).trim().slice(0, 140);
+  const descLimpia = String(descripcion || '').trim().slice(0, 350);
+  const rol = req.usuario?.rol || 'ESTUDIANTE';
+  const esStaff = rol === 'ADMIN' || rol === 'MODERADOR';
+
+  try {
+    await asegurarTablaSugerencias();
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Error al preparar tabla de sugerencias.',
+      detalle: error.message
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    if (esStaff) {
+      const nuevoId = `poi-${Date.now()}`;
+      const nuevoLugar = await client.query(
+        `INSERT INTO lugares (id, nombre, descripcion, tipo, edificio_id, longitud, latitud, palabras_clave)
+         VALUES ($1, $2, $3, 'Punto de Interés', NULL, $4, $5, $6)
+         RETURNING *`,
+        [
+          nuevoId,
+          nombreLimpio,
+          descLimpia || 'Punto de interés del campus',
+          lng,
+          lat,
+          [nombreLimpio.toLowerCase(), 'punto de interes']
+        ]
+      );
+
+      const nuevaVersion = await incrementarVersion(client);
+      await client.query('COMMIT');
+
+      return res.status(201).json({
+        mensaje: 'Punto de interés publicado en el mapa del campus.',
+        aprobado_directo: true,
+        version_campus: nuevaVersion,
+        lugar: nuevoLugar.rows[0]
+      });
+    }
+
+    const sugerencia = await client.query(
+      `INSERT INTO sugerencias_lugar (nombre, descripcion, tipo, longitud, latitud, usuario_id)
+       VALUES ($1, $2, 'Punto de Interés', $3, $4, $5)
+       RETURNING id, nombre, descripcion, tipo, longitud, latitud, estado, creado_en`,
+      [nombreLimpio, descLimpia, lng, lat, req.usuario.id]
+    );
+
+    await client.query('COMMIT');
+
+    return res.status(201).json({
+      mensaje: 'Sugerencia enviada. Un moderador la revisará para publicarla en el mapa.',
+      aprobado_directo: false,
+      sugerencia: sugerencia.rows[0]
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    return res.status(500).json({
+      error: 'Error al registrar el punto de interés.',
+      detalle: error.message
+    });
+  } finally {
+    client.release();
+  }
+};
+
+export const listarSugerenciasLugar = async (_req, res) => {
+  try {
+    await asegurarTablaSugerencias();
+    const { rows } = await pool.query(`
+      SELECT s.id, s.nombre, s.descripcion, s.tipo, s.longitud, s.latitud,
+             s.estado, s.creado_en, u.nombre AS sugerido_por, u.correo
+      FROM sugerencias_lugar s
+      JOIN usuarios u ON s.usuario_id = u.id
+      ORDER BY
+        CASE WHEN s.estado = 'pendiente' THEN 0 ELSE 1 END,
+        s.creado_en DESC
+    `);
+    return res.json({ sugerencias: rows });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Error al obtener sugerencias de puntos de interés.',
+      detalle: error.message
+    });
+  }
+};
+
+export const resolverSugerenciaLugar = async (req, res) => {
+  const id = Number(req.params.id);
+  const { estado } = req.body;
+
+  if (!Number.isInteger(id) || !['aprobado', 'rechazado'].includes(estado)) {
+    return res.status(400).json({ error: 'Solicitud inválida.' });
+  }
+
+  try {
+    await asegurarTablaSugerencias();
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Error al preparar tabla de sugerencias.',
+      detalle: error.message
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const sugRes = await client.query(
+      'SELECT * FROM sugerencias_lugar WHERE id = $1',
+      [id]
+    );
+
+    if (!sugRes.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Sugerencia no encontrada.' });
+    }
+
+    const sug = sugRes.rows[0];
+
+    await client.query(
+      'UPDATE sugerencias_lugar SET estado = $1 WHERE id = $2',
+      [estado, id]
+    );
+
+    let nuevaVersion = null;
+    let lugarCreado = null;
+
+    if (estado === 'aprobado') {
+      const nuevoId = `poi-${sug.id}-${Date.now()}`;
+      const ins = await client.query(
+        `INSERT INTO lugares (id, nombre, descripcion, tipo, edificio_id, longitud, latitud, palabras_clave)
+         VALUES ($1, $2, $3, 'Punto de Interés', NULL, $4, $5, $6)
+         RETURNING *`,
+        [
+          nuevoId,
+          sug.nombre,
+          sug.descripcion || 'Punto de interés del campus',
+          Number(sug.longitud),
+          Number(sug.latitud),
+          [sug.nombre.toLowerCase(), 'punto de interes']
+        ]
+      );
+      lugarCreado = ins.rows[0];
+      nuevaVersion = await incrementarVersion(client);
+    }
+
+    await client.query('COMMIT');
+
+    return res.json({
+      mensaje:
+        estado === 'aprobado'
+          ? `Punto "${sug.nombre}" aprobado y visible para todo el campus.`
+          : 'Sugerencia rechazada.',
+      version_campus: nuevaVersion,
+      lugar: lugarCreado
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    return res.status(500).json({
+      error: 'Error al moderar punto de interés.',
+      detalle: error.message
+    });
+  } finally {
+    client.release();
+  }
+};

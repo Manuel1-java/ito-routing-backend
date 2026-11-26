@@ -7,7 +7,10 @@ import {
   cambiarEstadoTramo,
   crearReporteIncidencia,
   listarReportes,
-  resolverReporte
+  resolverReporte,
+  crearSugerenciaLugar,
+  listarSugerenciasLugar,
+  resolverSugerenciaLugar
 } from '../controllers/campus.controller.js';
 import { verificarToken, requerirRol } from '../middlewares/auth.middleware.js';
 
@@ -250,5 +253,29 @@ router.get('/reportes', verificarToken, requerirRol('MODERADOR', 'ADMIN'), lista
  *         description: Reporte procesado
  */
 router.patch('/reportes/:id', verificarToken, requerirRol('MODERADOR', 'ADMIN'), resolverReporte);
+
+/**
+ * @swagger
+ * /api/campus/sugerencias-lugar:
+ *   post:
+ *     summary: Publicar (ADMIN/MODERADOR) o sugerir (ESTUDIANTE) un punto de interes en el campus
+ *     tags: [Campus]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       201:
+ *         description: Punto de interes registrado o enviado a revision
+ *   get:
+ *     summary: Listar sugerencias de puntos de interes (MODERADOR o ADMIN)
+ *     tags: [Campus]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lista de sugerencias
+ */
+router.post('/sugerencias-lugar', verificarToken, crearSugerenciaLugar);
+router.get('/sugerencias-lugar', verificarToken, requerirRol('MODERADOR', 'ADMIN'), listarSugerenciasLugar);
+router.patch('/sugerencias-lugar/:id', verificarToken, requerirRol('MODERADOR', 'ADMIN'), resolverSugerenciaLugar);
 
 export default router;

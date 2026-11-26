@@ -8,6 +8,7 @@ import authRoutes from './routes/auth.routes.js';
 import campusRoutes from './routes/campus.routes.js';
 import eventosRoutes from './routes/eventos.routes.js';
 import { asegurarTablaEventos } from './controllers/eventos.controller.js';
+import { asegurarTablaSugerencias } from './controllers/campus.controller.js';
 
 dotenv.config();
 
@@ -61,7 +62,7 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
-asegurarTablaEventos()
+Promise.all([asegurarTablaEventos(), asegurarTablaSugerencias()])
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Servidor corriendo en http://localhost:${PORT}`);
@@ -69,6 +70,6 @@ asegurarTablaEventos()
     });
   })
   .catch((err) => {
-    console.error('Error al inicializar tabla eventos_campus:', err);
+    console.error('Error al inicializar tablas:', err);
     process.exit(1);
   });

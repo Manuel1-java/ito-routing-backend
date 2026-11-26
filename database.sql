@@ -89,5 +89,16 @@ CREATE TABLE eventos_campus (
     creado_en TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_eventos_campus_estado_fechas
-    ON eventos_campus (estado, fecha_inicio, fecha_fin);
+CREATE INDEX idx_eventos_campus_estado_fechas ON eventos_campus (estado, fecha_inicio, fecha_fin);
+
+CREATE TABLE sugerencias_lugar (
+    id SERIAL PRIMARY KEY,
+    nombre VARCHAR(150) NOT NULL,
+    descripcion TEXT,
+    tipo VARCHAR(60) NOT NULL DEFAULT 'Punto de Interés',
+    longitud DOUBLE PRECISION NOT NULL,
+    latitud DOUBLE PRECISION NOT NULL,
+    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE CASCADE,
+    estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+    creado_en TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
