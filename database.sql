@@ -69,3 +69,25 @@ CREATE TABLE campus_metadata (
 );
 
 INSERT INTO campus_metadata (id, version) VALUES (1, 1);
+
+CREATE TABLE eventos_campus (
+    id SERIAL PRIMARY KEY,
+    titulo VARCHAR(150) NOT NULL,
+    descripcion TEXT,
+    organizador VARCHAR(120),
+    edificio_id VARCHAR(50) NOT NULL,
+    salon_id VARCHAR(80),
+    salon_nombre VARCHAR(120),
+    piso VARCHAR(10) DEFAULT 'PB',
+    espacio_detalle VARCHAR(150),
+    fecha_inicio TIMESTAMPTZ NOT NULL,
+    fecha_fin TIMESTAMPTZ NOT NULL,
+    imagen_webp TEXT,
+    estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+    pospuesto BOOLEAN NOT NULL DEFAULT FALSE,
+    creado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    creado_en TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_eventos_campus_estado_fechas
+    ON eventos_campus (estado, fecha_inicio, fecha_fin);

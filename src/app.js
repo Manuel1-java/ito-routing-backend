@@ -6,6 +6,8 @@ import { swaggerSpec } from './config/swagger.js';
 import { pool } from './config/db.js';
 import authRoutes from './routes/auth.routes.js';
 import campusRoutes from './routes/campus.routes.js';
+import eventosRoutes from './routes/eventos.routes.js';
+import { asegurarTablaEventos } from './controllers/eventos.controller.js';
 
 dotenv.config();
 
@@ -41,6 +43,7 @@ app.use(express.json({ limit: '5mb' }));
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use('/api/auth', authRoutes);
 app.use('/api/campus', campusRoutes);
+app.use('/api/eventos', eventosRoutes);
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -58,7 +61,14 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en http://localhost:${PORT}`);
-  console.log(`Documentacion Swagger disponible en http://localhost:${PORT}/api-docs`);
-});
+asegurarTablaEventos()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Servidor corriendo en http://localhost:${PORT}`);
+      console.log(`Documentacion Swagger disponible en http://localhost:${PORT}/api-docs`);
+    });
+  })
+  .catch((err) => {
+    console.error('Error al inicializar tabla eventos_campus:', err);
+    process.exit(1);
+  });
