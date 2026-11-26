@@ -6,7 +6,8 @@ import {
   crearLugar,
   cambiarEstadoTramo,
   crearReporteIncidencia,
-  listarReportes
+  listarReportes,
+  resolverReporte
 } from '../controllers/campus.controller.js';
 import { verificarToken, requerirRol } from '../middlewares/auth.middleware.js';
 
@@ -218,5 +219,36 @@ router.patch('/rutas/:id/estado', verificarToken, requerirRol('MODERADOR', 'ADMI
  */
 router.post('/reportes', verificarToken, crearReporteIncidencia);
 router.get('/reportes', verificarToken, requerirRol('MODERADOR', 'ADMIN'), listarReportes);
+
+/**
+ * @swagger
+ * /api/campus/reportes/{id}:
+ *   patch:
+ *     summary: Aprobar (cerrando el tramo) o rechazar un reporte pendiente (MODERADOR o ADMIN)
+ *     tags: [Campus]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [estado]
+ *             properties:
+ *               estado:
+ *                 type: string
+ *                 enum: [aprobado, rechazado]
+ *     responses:
+ *       200:
+ *         description: Reporte procesado
+ */
+router.patch('/reportes/:id', verificarToken, requerirRol('MODERADOR', 'ADMIN'), resolverReporte);
 
 export default router;

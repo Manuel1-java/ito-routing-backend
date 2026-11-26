@@ -10,7 +10,6 @@ const incrementarVersion = async (client) => {
   return res.rows[0].version;
 };
 
-// Endpoint publico para la app movil/web (Offline-First)
 export const sincronizarCampus = async (req, res) => {
   const versionCliente = Number(req.query.version) || 0;
 
@@ -30,7 +29,7 @@ export const sincronizarCampus = async (req, res) => {
     const [edificiosRes, lugaresRes, rutasRes] = await Promise.all([
       pool.query('SELECT id, codigo, nombre, altura, base, piso, geometria FROM edificios ORDER BY nombre ASC'),
       pool.query('SELECT id, nombre, descripcion, tipo, edificio_id, longitud, latitud, palabras_clave FROM lugares ORDER BY nombre ASC'),
-      pool.query('SELECT id, tipo, piso, edificio_id, geometria FROM tramos_ruta WHERE habilitado = TRUE ORDER BY id ASC')
+      pool.query('SELECT id, tipo, piso, edificio_id, habilitado, geometria FROM tramos_ruta ORDER BY id ASC')
     ]);
 
     const edificiosGeoJSON = {
@@ -55,9 +54,11 @@ export const sincronizarCampus = async (req, res) => {
         type: 'Feature',
         properties: {
           fid: r.id,
+          id: r.id,
           Tipo: r.tipo,
           Piso: r.piso,
-          edificio_id: r.edificio_id
+          edificio_id: r.edificio_id,
+          habilitado: r.habilitado
         },
         geometry: r.geometria
       }))
@@ -89,7 +90,6 @@ export const sincronizarCampus = async (req, res) => {
   }
 };
 
-// ADMIN: Crear un edificio nuevo
 export const crearEdificio = async (req, res) => {
   const { id, nombre, altura = 4, base = 0, piso = 'PB', geometria } = req.body;
 
@@ -126,7 +126,6 @@ export const crearEdificio = async (req, res) => {
   }
 };
 
-// ADMIN: Eliminar un edificio
 export const eliminarEdificio = async (req, res) => {
   const { id } = req.params;
   const client = await pool.connect();
@@ -155,7 +154,6 @@ export const eliminarEdificio = async (req, res) => {
   }
 };
 
-// ADMIN: Crear un punto de interes / aula / laboratorio
 export const crearLugar = async (req, res) => {
   const { id, nombre, descripcion = '', tipo, edificio_id = null, coordenadas, palabras_clave = [] } = req.body;
 
@@ -201,7 +199,6 @@ export const crearLugar = async (req, res) => {
   }
 };
 
-// MODERADOR / ADMIN: Habilitar o deshabilitar un tramo de andador (cierre por obras)
 export const cambiarEstadoTramo = async (req, res) => {
   const { id } = req.params;
   const { habilitado } = req.body;
@@ -224,6 +221,13 @@ export const cambiarEstadoTramo = async (req, res) => {
       return res.status(404).json({ error: 'Tramo de ruta no encontrado.' });
     }
 
+    if (habilitado) {
+      await client.query(
+        "UPDATE reportes_incidencia SET estado = 'resuelto' WHERE tramo_id = $1 AND estado = 'aprobado'",
+        [id]
+      );
+    }
+
     const nuevaVersion = await incrementarVersion(client);
     await client.query('COMMIT');
 
@@ -240,7 +244,6 @@ export const cambiarEstadoTramo = async (req, res) => {
   }
 };
 
-// ESTUDIANTE / MODERADOR / ADMIN: Reportar un pasillo cerrado o incidencia
 export const crearReporteIncidencia = async (req, res) => {
   const { tramo_id, motivo } = req.body;
 
@@ -265,17 +268,74 @@ export const crearReporteIncidencia = async (req, res) => {
   }
 };
 
-// MODERADOR / ADMIN: Listar reportes pendientes
 export const listarReportes = async (_req, res) => {
   try {
     const resReportes = await pool.query(
-      `SELECT r.id, r.tramo_id, r.motivo, r.estado, r.creado_en, u.nombre AS reportado_por, u.correo
+      `SELECT r.id, r.tramo_id, r.motivo, r.estado, r.creado_en,
+              t.habilitado AS tramo_habilitado,
+              u.nombre AS reportado_por, u.correo
        FROM reportes_incidencia r
        JOIN usuarios u ON r.usuario_id = u.id
+       LEFT JOIN tramos_ruta t ON r.tramo_id = t.id
        ORDER BY r.creado_en DESC`
     );
     return res.json({ reportes: resReportes.rows });
   } catch (error) {
     return res.status(500).json({ error: 'Error al obtener reportes.', detalle: error.message });
+  }
+};
+
+export const resolverReporte = async (req, res) => {
+  const { id } = req.params;
+  const { estado } = req.body;
+
+  if (!['aprobado', 'rechazado'].includes(estado)) {
+    return res.status(400).json({ error: 'El estado debe ser "aprobado" o "rechazado".' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const repRes = await client.query(
+      'SELECT id, tramo_id, estado FROM reportes_incidencia WHERE id = $1',
+      [Number(id)]
+    );
+
+    if (repRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Reporte no encontrado.' });
+    }
+
+    const reporte = repRes.rows[0];
+
+    await client.query(
+      'UPDATE reportes_incidencia SET estado = $1 WHERE id = $2',
+      [estado, reporte.id]
+    );
+
+    let nuevaVersion = null;
+    if (estado === 'aprobado') {
+      await client.query(
+        'UPDATE tramos_ruta SET habilitado = FALSE WHERE id = $1',
+        [reporte.tramo_id]
+      );
+      nuevaVersion = await incrementarVersion(client);
+    }
+
+    await client.query('COMMIT');
+
+    return res.json({
+      mensaje:
+        estado === 'aprobado'
+          ? `Reporte aprobado y tramo #${reporte.tramo_id} cerrado en el mapa.`
+          : 'Reporte rechazado.',
+      version_campus: nuevaVersion
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    return res.status(500).json({ error: 'Error al procesar reporte.', detalle: error.message });
+  } finally {
+    client.release();
   }
 };
